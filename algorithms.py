@@ -21,6 +21,16 @@ def update_global_model_FedAvg(gm, clients):
             for name, param in gm.named_parameters():
                 param.add_(state_dict[name]/len(clients)) 
 
+def update_global_model_FedAsync(gm, clients):
+    with torch.no_grad():
+        for param in gm.parameters():
+            param.zero_()
+
+        for client in clients:
+            state_dict = client.model.state_dict()
+            for name, param in gm.named_parameters():
+                param.add_(state_dict[name]/len(clients)) 
+
 def train_FedDiff(model, clients, test_data, args, logger=None):
     model.reset()
     for client in clients:
