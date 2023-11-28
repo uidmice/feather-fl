@@ -13,7 +13,7 @@ def update_global_model_FedDiff(gm, client, num_dev):
                 param.add_(state_dict_c[name]/num_dev) 
         else:
             state_dict = gm.state_dict()
-            state_dict['l1.weight'] += state_dict_c['w1'].t() * client.model.scale_dict['w1']/num_dev
+            state_dict['l1.weight'] = state_dict['l1.weight'] + state_dict_c['w1'].t() * client.model.scale_dict['w1']/num_dev
             state_dict['l2.weight'] += state_dict_c['w2'].t() * client.model.scale_dict['w2']/num_dev
             state_dict['l1.bias'] += state_dict_c['b1'].t() * client.model.scale_dict['b1']/num_dev
             state_dict['l2.bias'] += state_dict_c['b2'].t() * client.model.scale_dict['b2']/num_dev
@@ -111,6 +111,8 @@ def train_FedAsync(model, clients, test_data, args, logger=None):
             acc, l = test_inference(model, test_data, CEloss)
             test_accuracy.append(acc)
             test_loss.append(l)
+            print("|---- Train Loss: {:.2f}".format(batch_loss))
+
             if logger:
                 logger.add_scalar("Train/Loss", batch_loss, t * args.num_clients + i)
                 logger.add_scalar("Test/Acc", acc, t * args.num_clients + i)
