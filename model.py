@@ -55,15 +55,50 @@ class QT:
         self.s_w2 = w2_r / 127
         self.s_b1 = self.s_x * self.s_w1
         self.s_b2 = self.s_y * self.s_w2
+
+        self.b2_grad_s = 1.0/32767
+        self.w2_grad_s = self.b2_grad_s * self.s_y
+
+        self.b1_grad_s = self.s_w2 * self.b2_grad_s
+        self.w1_grad_s = self.b1_grad_s /255.0
     
     def forward(self, x):
         x = F.relu(x * self.w1 + self.b1)
         x = torch.clamp(x * self.s_b1/self.s_y, min=0, max=255).to(torch.int)  
-        return F.softmax(x * self.w2 + self.b2)
+        return F.softmax((x * self.w2 + self.b2) * self.model.s_b2, dim=-1)
     
     def reset(self):
         self.w1 = torch.round((torch.rand_like(self.w1) - 0.5) * 2 *torch.sqrt(torch.tensor(1/self.dim_in)) /self.s_w1).to(torch.int)
         self.w2 = torch.round((torch.rand_like(self.w2) - 0.5) * 2 * torch.sqrt(torch.tensor(1/self.dim_hidden))/self.s_w2).to(torch.int)
         # self.b1 = torch.round((torch.rand_like(self.b1) - 0.5) * 2 * r/self.s_b1).to(torch.int)
         # self.b2 = torch.round((torch.rand_like(self.b2) - 0.5) * 2 * r/self.s_b2).to(torch.int)
+
+    def load_state_dict(self, target_dict):
+        self.w1 = target_dict['w1'].clone()
+        self.w2 = target_dict['w2'].clone()
+        self.b1 = target_dict['b1'].clone()
+        self.b2 = target_dict['b2'].clone()
+
+    def state_dict(self):
+        return  {
+            'w1': self.w1.clone(),
+            'w2': self.w2.clone(),
+            'b1': self.b1.clone(),
+            'b2': self.b2.clone()
+        }
+
+    def parameter_range(self):
+        w1_min = self.w1.min().item()
+        w1_max = self.w1.max().item()
+        w2_min = self.w2.min().item()
+        w2_max = self.w2.max().item()        
+        b1_min = self.b1.min().item()
+        b1_max = self.b1.max().item()
+        b2_min = self.b2.min().item()
+        b2_max = self.b2.max().item() 
+        return [[w1_min* self.s_w1, w1_max* self.s_w1], 
+                [w2_min* self.s_w2, w2_max* self.s_w2], 
+                [b1_min* self.s_b1, b1_max *self.s_b1], 
+                [b2_min* self.s_b2, b2_max* self.s_b2]]    
+
 

@@ -24,17 +24,34 @@ def get_dataset(args):
 
     return test_ds, client_ds
 
+def stochastic_round(tensor):
+    """
+    Perform stochastic rounding to nearest integer on a PyTorch tensor.
+    Numbers are rounded to the nearest integer with probabilities proportional 
+    to their proximity to the integers.
+    """
+    floor = torch.floor(tensor)
+    ceil = torch.ceil(tensor)
+    return torch.where(torch.rand_like(tensor) < (tensor - floor), floor, ceil).to(tensor.int)
+
 
 def exp_setup(args, client_data):
     if 'centralized' in args.fl:
         args.training_mode = 'fp'
         
     if args.dataset == 'mnist':
-        global_model = MLP(49, 32, 2)
-        clients = [Client(49, 32, 2, cdata) for cdata in client_data]
+        input_dim = 49
+        hidden_dim = 32
+        output_dim = 2
+
     else:
         raise ValueError(f"dataset {args.dataset} not provided")
-    
+
+    if args.training_mode == 'fp'
+        global_model = MLP(input_dim, hidden_dim, output_dim)
+    else:
+        global_model = QT(input_dim, hidden_dim, output_dim)
+    clients = [Client(input_dim, hidden_dim, output_dim, cdata, args.training_mode) for cdata in client_data]
     return global_model, clients
 
 def find_data_iter(steps, batch_size, ds_size):
