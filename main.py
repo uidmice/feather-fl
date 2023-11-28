@@ -61,6 +61,7 @@ if __name__ == '__main__':
         logger = SummaryWriter(f'{args.log}/{dir_path}')
 
     torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
 
     device = 'cpu'
 
