@@ -17,7 +17,7 @@ def get_dataset(args):
     else:
         if args.dataset == 'mnist':
             test_ds, _, client_ds, _ = prepare_mnist_data(dim=7, iid=0, 
-                                                            num_dev = args.num_client, 
+                                                            num_dev = args.num_clients, 
                                                             num_ds = 300)
         else:
             raise ValueError(f"Only MNIST for a large number of clients")
