@@ -25,7 +25,7 @@ def args_parser():
     parser.add_argument('--model_sync', action='store_true', help='latest_model synced')
 
     # model arguments
-    parser.add_argument('--training_mode', choices=['fp','qt'], default='fp', help='mode: fp (floating point), qat (quantization aware), qt (quantized training)')
+    parser.add_argument('--training_mode', choices=['fp','qt'], default='qt', help='mode: fp (floating point), qt (quantized training)')
     # other arguments
     parser.add_argument('--log', type=str, default='log', help='directry for tensorboard')
     parser.add_argument('--log_dir', type=str, help='directry for saving data')
@@ -73,7 +73,7 @@ if __name__ == '__main__':
     test_dataset, client_train_dataset = get_dataset(args)
 
     global_model, clients = exp_setup(args, client_train_dataset)
-
+    clients[0].test()
     start_time = time.time()
     if args.fl == 'centralized': #for sanity check
         train_loss, test_loss, test_accuracy = train_global(global_model, clients,test_dataset, args, logger)

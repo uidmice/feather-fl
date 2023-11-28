@@ -4,6 +4,16 @@ import torch.quantization as qat
 from torch.quantization import QuantStub, DeQuantStub
 import torch.nn.functional as F
 
+def stochastic_round(t):
+    """
+    Perform stochastic rounding to nearest integer on a PyTorch tensor.
+    Numbers are rounded to the nearest integer with probabilities proportional 
+    to their proximity to the integers.
+    """
+    floor = torch.floor(t)
+    ceil = torch.ceil(t)
+    return torch.where(torch.rand_like(t) < (t - floor), floor, ceil).to(torch.int)
+
 class MLP(nn.Module):
     def __init__(self, dim_in, dim_hidden, dim_out):
         super(MLP, self).__init__()
@@ -38,10 +48,19 @@ class MLP(nn.Module):
         b2_min = par_dict["l2.bias"].min().item()
         b2_max = par_dict["l2.bias"].max().item() 
         return [[w1_min, w1_max], [w2_min, w2_max], [b1_min, b1_max], [b2_min, b2_max]]    
+    
+    def quantize(self):
+        par_dict = self.state_dict()
+        qm = QT(self.dim_in, self.dim_hidden, self.dim_out)
+        qm.w1 = torch.clamp(stochastic_round(par_dict["l1.weight"] / qm.s_w1), -127, 127).to(torch.int).t()
+        qm.w2 = torch.clamp(stochastic_round(par_dict["l2.weight"] / qm.s_w2), -127, 127).to(torch.int).t()
+        qm.b1 = stochastic_round(par_dict["l1.bias"] / qm.s_b1)
+        qm.b2 = stochastic_round(par_dict["l2.bias"] / qm.s_b2)
+        return qm
 
 
 class QT:
-    def __init__(self, dim_in, dim_hidden, dim_out, w1_r = 1, w2_r = 1.5, y_r = 5):
+    def __init__(self, dim_in, dim_hidden, dim_out, w1_r = 1.0, w2_r = 1.5, y_r = 5.0):
         self.dim_in = dim_in
         self.dim_hidden = dim_hidden
         self.w1 = torch.zeros((dim_in, dim_hidden)).to(torch.int)
@@ -49,18 +68,25 @@ class QT:
         self.b1 = torch.zeros(dim_hidden).to(torch.int)
         self.b2 = torch.zeros(dim_out).to(torch.int)
         
-        self.s_x = 1.0 / 255
-        self.s_y = y_r / 255
-        self.s_w1 = w1_r / 127
-        self.s_w2 = w2_r / 127
+        self.s_x = 1.0 / 255.0
+        self.s_y = y_r / 255.0
+        self.s_w1 = w1_r / 127.0
+        self.s_w2 = w2_r / 127.0
         self.s_b1 = self.s_x * self.s_w1
         self.s_b2 = self.s_y * self.s_w2
 
-        self.b2_grad_s = 1.0/32767
+        self.scale_dict = {
+            "w1": self.s_w1,
+            "w2": self.s_w2,
+            "b1": self.s_b1,
+            "b2": self.s_b2
+        }
+
+        self.b2_grad_s = 1.0/32767.0
         self.w2_grad_s = self.b2_grad_s * self.s_y
 
         self.b1_grad_s = self.s_w2 * self.b2_grad_s
-        self.w1_grad_s = self.b1_grad_s /255.0
+        self.w1_grad_s = self.b1_grad_s * self.s_x
     
     def forward(self, x):
         x = F.relu(x * self.w1 + self.b1)
@@ -68,10 +94,10 @@ class QT:
         return F.softmax((x * self.w2 + self.b2) * self.model.s_b2, dim=-1)
     
     def reset(self):
-        self.w1 = torch.round((torch.rand_like(self.w1) - 0.5) * 2 *torch.sqrt(torch.tensor(1/self.dim_in)) /self.s_w1).to(torch.int)
-        self.w2 = torch.round((torch.rand_like(self.w2) - 0.5) * 2 * torch.sqrt(torch.tensor(1/self.dim_hidden))/self.s_w2).to(torch.int)
-        # self.b1 = torch.round((torch.rand_like(self.b1) - 0.5) * 2 * r/self.s_b1).to(torch.int)
-        # self.b2 = torch.round((torch.rand_like(self.b2) - 0.5) * 2 * r/self.s_b2).to(torch.int)
+        self.w1 = torch.round((torch.rand(self.w1.shape) - 0.5) * 2 *torch.sqrt(torch.tensor(1/self.dim_in)) /self.s_w1).to(torch.int)
+        self.w2 = torch.round((torch.rand(self.w2.shape) - 0.5) * 2 * torch.sqrt(torch.tensor(1/self.dim_hidden))/self.s_w2).to(torch.int)
+        self.b1 = torch.round((torch.rand(self.b1.shape) - 0.5) * 2 *(torch.tensor(1/self.dim_hidden)/self.s_b1)).to(torch.int)
+        self.b2 = torch.round((torch.rand(self.b2.shape) - 0.5) * 2 *(torch.tensor(1/self.dim_out)/self.s_b2 )).to(torch.int)
 
     def load_state_dict(self, target_dict):
         self.w1 = target_dict['w1'].clone()

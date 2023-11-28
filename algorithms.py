@@ -6,30 +6,57 @@ from torch.utils.data import DataLoader, ConcatDataset
 import numpy as np
 
 def update_global_model_FedDiff(gm, client, num_dev):
-    state_dict = client.get_model_diff()
+    state_dict_c = client.get_model_diff()
     with torch.no_grad():
-        for name, param in gm.named_parameters():
-            param.add_(state_dict[name]/num_dev) 
+        if client.mode == 'fp':
+            for name, param in gm.named_parameters():
+                param.add_(state_dict_c[name]/num_dev) 
+        else:
+            state_dict = gm.state_dict()
+            state_dict['l1.weight'] += state_dict_c['w1'].t() * client.model.scale_dict['w1']/num_dev
+            state_dict['l2.weight'] += state_dict_c['w2'].t() * client.model.scale_dict['w2']/num_dev
+            state_dict['l1.bias'] += state_dict_c['b1'].t() * client.model.scale_dict['b1']/num_dev
+            state_dict['l2.bias'] += state_dict_c['b2'].t() * client.model.scale_dict['b2']/num_dev
+            gm.load_state_dict(state_dict)
+
             
 def update_global_model_FedAvg(gm, clients):
     with torch.no_grad():
         for param in gm.parameters():
             param.zero_()
+        state_dict = gm.state_dict()
 
         for client in clients:
-            state_dict = client.model.state_dict()
-            for name, param in gm.named_parameters():
-                param.add_(state_dict[name]/len(clients)) 
+            state_dict_c = client.model.state_dict()
+            if client.mode == 'fp':
+                for name, param in gm.named_parameters():
+                    state_dict[name] += state_dict_c[name]/len(clients)
+            else:
+                state_dict['l1.weight'] += state_dict_c['w1'].t() * client.model.scale_dict['w1']/len(clients)
+                state_dict['l2.weight'] += state_dict_c['w2'].t() * client.model.scale_dict['w2']/len(clients)
+                state_dict['l1.bias'] += state_dict_c['b1'].t() * client.model.scale_dict['b1']/len(clients)
+                state_dict['l2.bias'] += state_dict_c['b2'].t() * client.model.scale_dict['b2']/len(clients)
+        gm.load_state_dict(state_dict)
+    
 
 def update_global_model_FedAsync(gm, client, dt):
     alpha = 1/(1 + dt)
+    state_dict = gm.state_dict()
+    state_dict_c = client.model.state_dict()
+
     with torch.no_grad():
-        state_dict = gm.state_dict()
-        state_dict_new = client.model.state_dict()
-        for name in state_dict:
-            state_dict[name] *= 1 - alpha
-            state_dict[name] += alpha * state_dict_new[name]
+        if client.mode == 'fp':
+            for name in state_dict:
+                state_dict[name] *= 1 - alpha
+                state_dict[name] += alpha * state_dict_c[name]
+        else:
+            state_dict['l1.weight'] = state_dict['l1.weight'] * (1-alpha) + alpha * state_dict_c['w1'].t() * client.model.scale_dict['w1']
+            state_dict['l2.weight'] = state_dict['l2.weight'] * (1-alpha) + alpha *state_dict_c['w2'].t() * client.model.scale_dict['w2']
+            state_dict['l1.bias'] = state_dict['l1.bias'] * (1-alpha) + alpha *state_dict_c['b1'].t() * client.model.scale_dict['b1']
+            state_dict['l2.bias'] = state_dict['l2.bias'] * (1-alpha) + alpha *state_dict_c['b2'].t() * client.model.scale_dict['b2']
         gm.load_state_dict(state_dict)
+
+        
 
 def train_FedAsync(model, clients, test_data, args, logger=None):
     model.reset()
@@ -41,12 +68,14 @@ def train_FedAsync(model, clients, test_data, args, logger=None):
     train_loss = []
     CEloss = nn.CrossEntropyLoss()
     order = [i for i in range(args.num_clients)]
-    permu = []
-    cur = [i for i in range(args.num_clients)]
-    for i in range(len(clients)):
-        permu.append(cur.copy())
-        cur = [cur[-1]] + cur[:-1]
-    random.shuffle(permu)
+    
+    if args.participation == 1:
+        permu = []
+        cur = [i for i in range(args.num_clients)]
+        for i in range(len(clients)):
+            permu.append(cur.copy())
+            cur = [cur[-1]] + cur[:-1]
+        random.shuffle(permu)
 
     last_update_time = [0 for i in range(len(clients))]
 
@@ -65,13 +94,18 @@ def train_FedAsync(model, clients, test_data, args, logger=None):
             client = clients[j]
             if args.model_sync:
                 client.update_model(model)
-            batch_loss = client.local_SGD(args.local_bs , args.local_ep, args.lr)
+            
+            cur_time = t * args.num_clients + i
+            if args.training_mode == 'fp':
+                batch_loss = client.local_SGD(args.local_bs , args.local_ep, args.lr)
+            else:
+                batch_loss = client.local_SGD_GT(args.local_bs , args.local_ep, args.lr)
             if args.fl == 'feddif':
                 update_global_model_FedDiff(model, client, len(clients))
             elif args.fl == 'fedasync':
-                cur_time = t * args.num_clients + i
-                update_global_model_FedAsync(model, client, cur_time - last_update_time[j])
-                last_update_time[j] = cur_time
+                update_global_model_FedAsync(model, client, cur_time - last_update_time[j] - 1)
+            
+            last_update_time[j] = cur_time
             client.update_model(model)
             train_loss.append(batch_loss)
             acc, l = test_inference(model, test_data, CEloss)
@@ -105,7 +139,10 @@ def train_FedAvg(model, clients, test_data, args, logger=None):
         for client in clients: 
             client.update_model(model)
         for client in clients:
-            batch_loss = client.local_SGD(args.local_bs , args.local_ep, args.lr)
+            if args.training_mode == 'fp':
+                batch_loss = client.local_SGD(args.local_bs , args.local_ep, args.lr)
+            else:
+                batch_loss = client.local_SGD_GT(args.local_bs , args.local_ep, args.lr)            
             train_loss.append(batch_loss)
         update_global_model_FedAvg(model, clients)
         acc, l = test_inference(model, test_data, CEloss)
