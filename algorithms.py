@@ -1,5 +1,5 @@
 import torch
-import itertools, random
+import random
 from torch import nn
 from utils import test_inference, find_data_iter
 from torch.utils.data import DataLoader, ConcatDataset
@@ -21,20 +21,19 @@ def update_global_model_FedAvg(gm, clients):
             for name, param in gm.named_parameters():
                 param.add_(state_dict[name]/len(clients)) 
 
-def update_global_model_FedAsync(gm, clients):
+def update_global_model_FedAsync(gm, client, dt):
+    alpha = 1/(1 + dt)
     with torch.no_grad():
-        for param in gm.parameters():
-            param.zero_()
+        state_dict = gm.state_dict()
+        state_dict_new = client.model.state_dict()
+        for name in state_dict:
+            state_dict[name] *= 1 - alpha
+            state_dict[name] += alpha * state_dict_new[name]
+        gm.load_state_dict(state_dict)
 
-        for client in clients:
-            state_dict = client.model.state_dict()
-            for name, param in gm.named_parameters():
-                param.add_(state_dict[name]/len(clients)) 
-
-def train_FedDiff(model, clients, test_data, args, logger=None):
+def train_FedAsync(model, clients, test_data, args, logger=None):
     model.reset()
     for client in clients:
-        client.reset()
         client.update_model(model)
     
     test_accuracy = []
@@ -42,14 +41,21 @@ def train_FedDiff(model, clients, test_data, args, logger=None):
     train_loss = []
     CEloss = nn.CrossEntropyLoss()
     order = [i for i in range(args.num_clients)]
-    permu = list(itertools.permutations(range(args.num_clients), args.num_clients))[:3]
+    permu = []
+    cur = [i for i in range(args.num_clients)]
+    for i in range(len(clients)):
+        permu.append(cur.copy())
+        cur = [cur[-1]] + cur[:-1]
+    random.shuffle(permu)
+
+    last_update_time = [0 for i in range(len(clients))]
 
 
     for t in range(args.total_ep):
         if args.participation == 1:
-            order = permu[t%3]
+            order = permu[t%len(clients)]
         elif args.participation == 2:
-            order = random.shuffle(order)
+            random.shuffle(order)
         
         if args.sync:
             for client in clients: 
@@ -60,7 +66,12 @@ def train_FedDiff(model, clients, test_data, args, logger=None):
             if args.model_sync:
                 client.update_model(model)
             batch_loss = client.local_SGD(args.local_bs , args.local_ep, args.lr)
-            update_global_model_FedDiff(model, client, len(clients))
+            if args.fl == 'feddif':
+                update_global_model_FedDiff(model, client, len(clients))
+            elif args.fl == 'fedasync':
+                cur_time = t * args.num_clients + i
+                update_global_model_FedAsync(model, client, cur_time - last_update_time[j])
+                last_update_time[j] = cur_time
             client.update_model(model)
             train_loss.append(batch_loss)
             acc, l = test_inference(model, test_data, CEloss)
@@ -73,7 +84,11 @@ def train_FedDiff(model, clients, test_data, args, logger=None):
         print(f"|---- Global Step: {t}")
         print("|---- Test Loss: {:.2f}".format(l))
         print("|---- Test Accuracy: {:.2f}%".format(100*acc))
+        print(f"|----------------------------------------------|")
+
     return  train_loss, test_loss, test_accuracy
+            
+
 
 def train_FedAvg(model, clients, test_data, args, logger=None):
     model.reset()
@@ -99,6 +114,8 @@ def train_FedAvg(model, clients, test_data, args, logger=None):
         print(f"|---- Global Step: {i}")
         print("|---- Test Loss: {:.2f}".format(l))
         print("|---- Test Accuracy: {:.2f}%".format(100*acc))
+        print(f"|----------------------------------------------|")
+
         if logger:
             logger.add_scalar("Train/Loss", np.average(train_loss[-args.num_clients:]), (i +1) * args.num_clients )
             logger.add_scalar("Test/Acc", acc, (i +1) * args.num_clients )
@@ -150,7 +167,9 @@ def train_global(model, clients, test_data, args, logger=None):
                 if step_count//args.local_ep % args.num_clients == 0:
                     print(f"|---- Global Step: {step_count//args.local_ep//args.num_clients}")
                     print("|---- Test Loss: {:.2f}".format(l))
-                    print("|---- Test Accuracy: {:.2f}%".format(100*acc))    
+                    print("|---- Test Accuracy: {:.2f}%".format(100*acc))   
+                    print("|----------------------------------------------|")
+ 
     return  train_loss, test_loss, test_accuracy
 
 
@@ -169,14 +188,18 @@ def train_global_partitioned(model, clients, test_data, args, logger=None):
     train_loss = []
     
     order = [i for i in range(args.num_clients)]
-    permu = list(itertools.permutations(range(args.num_clients), args.num_clients))[:3]
-
+    permu = []
+    cur = [i for i in range(args.num_clients)]
+    for i in range(len(clients)):
+        permu.append(cur.copy())
+        cur = [cur[-1]] + cur[:-1]
+    random.shuffle(permu)
 
     for t in range(args.total_ep):
         if args.participation == 1:
-            order = permu[t%3]
+            order = permu[t%len(clients)]
         elif args.participation == 2:
-            order = random.shuffle(order)
+            random.shuffle(order)
 
         for i, j in enumerate(order):
             data_loader = data_loaders[j]
@@ -204,5 +227,7 @@ def train_global_partitioned(model, clients, test_data, args, logger=None):
         print(f"|---- Global Step: {t }")
         print("|---- Test Loss: {:.2f}".format(l))
         print("|---- Test Accuracy: {:.2f}%".format(100*acc))
+        print("|----------------------------------------------|")
+
 
     return  train_loss, test_loss, test_accuracy

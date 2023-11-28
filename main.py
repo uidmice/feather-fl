@@ -19,7 +19,7 @@ def args_parser():
                         help="local batch size: B")
     parser.add_argument('--lr', type=float, default=0.01,
                         help='learning rate')
-    parser.add_argument('--participation', choices=[0,1,2], default=0, help="0:cyclic, 1: deterministically spread, 2:randomly")
+    parser.add_argument('--participation', choices=[0,1,2], type=int, default=0, help="0:cyclic, 1: deterministically spread, 2:randomly")
     parser.add_argument('--fl', choices=['feddif','fedavg','fedasync', 'centralized', 'centralized_p'], default='feddif', help='Fl algs: feddif, fedasync, fedavg, fedmis')
     parser.add_argument('--sync', action='store_true', help='synchronous FL')
     parser.add_argument('--model_sync', action='store_true', help='latest_model synced')
@@ -83,8 +83,8 @@ if __name__ == '__main__':
     elif args.fl == 'fedavg':
         train_loss, test_loss, test_accuracy = train_FedAvg(global_model, clients,test_dataset, args, logger)
 
-    elif args.fl == 'feddif':
-        train_loss, test_loss, test_accuracy = train_FedDiff(global_model, clients,test_dataset, args, logger)
+    elif args.fl == 'feddif' or args.fl == 'fedasync' :
+        train_loss, test_loss, test_accuracy = train_FedAsync(global_model, clients,test_dataset, args, logger)
     else:
         raise ValueError(f"{args.fl} not implemented")
 
@@ -99,6 +99,8 @@ if __name__ == '__main__':
     print(global_model.parameter_range())
 
 
-    with open(f'runs/{dir_path}/results.pk', 'wb') as f:
-        pickle.dump([test_loss, test_accuracy, train_loss], f)
-        pickle.dump(global_model, f)
+    pickle.dump([test_loss, test_accuracy, train_loss], open(f'runs/{dir_path}/results.pk', 'wb'))
+    pickle.dump(global_model, open(f'runs/{dir_path}/model.pk', 'wb'))
+    pickle.dump(args, open(f'runs/{dir_path}/args.pk', 'wb'))
+
+
