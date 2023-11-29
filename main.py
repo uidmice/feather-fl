@@ -9,9 +9,9 @@ from algorithms import *
 def args_parser():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--total_ep', type=int, default=100,
+    parser.add_argument('--total_ep', type=int, default=200,
                         help="number of rounds of training")
-    parser.add_argument('--num_clients', type=int, default=5,
+    parser.add_argument('--num_clients', type=int, default=10,
                         help="number of users: K")
     parser.add_argument('--local_ep', type=int, default=60,
                         help="the number of local epochs: E")
@@ -19,16 +19,18 @@ def args_parser():
                         help="local batch size: B")
     parser.add_argument('--lr', type=float, default=0.01,
                         help='learning rate')
-    parser.add_argument('--participation', choices=[0,1,2], type=int, default=0, help="0:cyclic, 1: deterministically spread, 2:randomly")
-    parser.add_argument('--fl', choices=['feddif','fedavg','fedasync', 'centralized', 'centralized_p'], default='feddif', help='Fl algs: feddif, fedasync, fedavg, fedmis')
+    parser.add_argument('--participation', choices=[0,1,2, 3], type=int, default=0, help="0:cyclic, 1: deterministically spread, 2:random periodic, 3.random")
+    parser.add_argument('--fl', choices=['feddif','fedavg','fedasync', 'fedaw','centralized', 'centralized_p'], default='fedaw', help='Fl algs: feddif, fedasync, fedavg, fedmis')
     parser.add_argument('--sync', action='store_true', help='synchronous FL')
     parser.add_argument('--model_sync', action='store_true', help='latest_model synced')
 
     # model arguments
     parser.add_argument('--training_mode', choices=['fp','qt'], default='qt', help='mode: fp (floating point), qt (quantized training)')
+    parser.add_argument('--deterministic_rounding', action='store_false',dest='sr',  help='use deterministic rounding') 
+
     # other arguments
     parser.add_argument('--log', type=str, default='log', help='directry for tensorboard')
-    parser.add_argument('--log_dir', type=str, help='directry for saving data')
+    parser.add_argument('--log_dir', type=str, default='n10', help='directry for saving data')
     parser.add_argument('--suffix', type=str, help='additional comments')
 
     parser.add_argument('--dataset', type=str, default='mnist', help="name \
@@ -47,7 +49,7 @@ if __name__ == '__main__':
     logger = None
     if not args.log_dir:
         args.log_dir = args.dataset
-    dir_path = f"{args.log_dir}/{args.fl}_{args.training_mode}_part_{args.participation}_num_{args.num_clients}"
+    dir_path = f"{args.log_dir}/{args.fl}_{args.training_mode}_part_{args.participation}_lr_{args.lr}"
     if args.suffix:
         dir_path += f"_{args.suffix}"
     if not os.path.exists('runs'):
@@ -73,7 +75,7 @@ if __name__ == '__main__':
     test_dataset, client_train_dataset = get_dataset(args)
 
     global_model, clients = exp_setup(args, client_train_dataset)
-    clients[0].test()
+
     start_time = time.time()
     if args.fl == 'centralized': #for sanity check
         train_loss, test_loss, test_accuracy = train_global(global_model, clients,test_dataset, args, logger)
@@ -86,6 +88,8 @@ if __name__ == '__main__':
 
     elif args.fl == 'feddif' or args.fl == 'fedasync' :
         train_loss, test_loss, test_accuracy = train_FedAsync(global_model, clients,test_dataset, args, logger)
+    elif args.fl == 'fedaw':
+        train_loss, test_loss, test_accuracy, global_model = train_FedAW(global_model, clients,test_dataset, args, logger)
     else:
         raise ValueError(f"{args.fl} not implemented")
 

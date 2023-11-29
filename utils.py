@@ -62,9 +62,8 @@ def test_inference(model, dataset, loss):
             _, pred_labels = torch.max(outputs, 1)
             pred_labels = pred_labels.view(-1)
             correct += torch.sum(torch.eq(pred_labels, labels)).item()
-            break
 
-    return correct/2000, l
+    return correct/len(dataset), l
 
 
 def mnist_iid_samples(dataset, num_users, subset_size):
