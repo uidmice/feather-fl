@@ -7,17 +7,19 @@ from  model import MLP, QT, stochastic_round
 
 
 class Client:
-    def __init__(self, dim_in, dim_hidden, dim_out, dataset, mode = 'fp'):
+    def __init__(self, dim_in, dim_hidden, dim_out, dataset, mode = 'fp', w1_range = None, w2_range = None, y_range = None):
         self.mode = mode   # FP: FLOATING POINT, qt: QUANTIZATION AWARE TRAINING
         self.dataset = dataset
  
         if mode == 'fp':
             self.model = MLP(dim_in, dim_hidden, dim_out)
             self.global_model = MLP(dim_in, dim_hidden, dim_out)
+
+
             
         else: #qt
-            self.model = QT(dim_in, dim_hidden, dim_out)
-            self.global_model = QT(dim_in, dim_hidden, dim_out)
+            self.model = QT(dim_in, dim_hidden, dim_out, w1_range, w2_range, y_range)
+            self.global_model = QT(dim_in, dim_hidden, dim_out, w1_range, w2_range, y_range)
         self.loss = nn.CrossEntropyLoss()
         
         
@@ -100,8 +102,8 @@ class Client:
                 if sr:
                     self.model.w1 = torch.clamp(stochastic_round(w1), -127, 127).to(torch.int)
                     self.model.w2 = torch.clamp(stochastic_round(w2), -127, 127).to(torch.int)
-                    self.model.b1 = stochastic_round(b1)
-                    self.model.b2 = stochastic_round(b2)
+                    self.model.b1 = torch.clamp(stochastic_round(b1), -20/self.model.s_b1, 20/self.model.s_b1).to(torch.int)
+                    self.model.b2 = torch.clamp(stochastic_round(b2), -20/self.model.s_b1, 20/self.model.s_b2).to(torch.int)
                 else:
                     self.model.w1 = torch.round(w1).to(torch.int)
                     self.model.w2 = torch.round(w2).to(torch.int)

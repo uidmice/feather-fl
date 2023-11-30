@@ -71,6 +71,9 @@ class QT:
         self.b2 = torch.zeros(dim_out).to(torch.int)
         
         self.s_x = 1.0/255
+        y_r = y_r if y_r is not None else 5.0
+        w1_r = w1_r if w1_r is not None else 1.0
+        w2_r = w2_r if w2_r is not None else 1.5
         self.s_y = y_r / 255.0
         self.s_w1 = w1_r / 127.0
         self.s_w2 = w2_r / 127.0

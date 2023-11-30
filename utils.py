@@ -11,6 +11,21 @@ def get_dataset(args):
         if args.dataset == 'mnist':
             test_ds = pickle.load(open('data/mnist/test_data.pk', 'rb'))
             client_ds = pickle.load(open('data/mnist/client_data.pk', 'rb'))
+        elif args.dataset == 'thermal':
+            test_ds = pickle.load(open('data/thermal/test_data.pk', 'rb'))
+            client_ds = pickle.load(open('data/thermal/client_data.pk', 'rb'))
+            if args.training_mode == 'fp':
+                td = []
+                for data in test_ds:
+                    td.append((data[0] * 255/70, data[1]))
+                test_ds = td
+                cd = []
+                for client in client_ds:
+                    td = []
+                    for data in client:
+                        td.append((data[0] * 255/70, data[1]))
+                    cd.append(td)
+                client_ds = cd
         else:
             raise ValueError(f"dataset {args.dataset} not provided")
 
@@ -33,12 +48,24 @@ def exp_setup(args, client_data):
         input_dim = 49
         hidden_dim = 32
         output_dim = 2
+        clients = [Client(input_dim, hidden_dim, output_dim, cdata, args.training_mode) for cdata in client_data]
+
+
+    elif args.dataset == 'thermal':
+        input_dim = 64
+        hidden_dim = 32
+        output_dim = 2
+        args.local_bs = 80
+
+        clients = [Client(input_dim, hidden_dim, output_dim, cdata, 
+                          args.training_mode, 0.5, 1.2, 5.0) for cdata in client_data]
 
     else:
         raise ValueError(f"dataset {args.dataset} not provided")
 
     global_model = MLP(input_dim, hidden_dim, output_dim)
-    clients = [Client(input_dim, hidden_dim, output_dim, cdata, args.training_mode) for cdata in client_data]
+    # clients = [Client(input_dim, hidden_dim, output_dim, cdata, args.training_mode) for cdata in client_data]
+
     return global_model, clients
 
 def find_data_iter(steps, batch_size, ds_size):
@@ -113,4 +140,22 @@ def prepare_mnist_data(dim, iid=0, num_dev = 5, num_ds = 300):
     if iid:
         return mnist_even_odd_test, mnist_even_odd_train, *mnist_iid_samples(mnist_train, num_dev, num_ds)
     return mnist_even_odd_test, mnist_even_odd_train, *mnist_non_iid_samples(mnist_train, num_dev, num_ds)
-    
+
+def samples(dataset, num_users):
+    total_indices = np.arange(len(dataset))
+    np.random.shuffle(total_indices)
+
+    ds = []
+    num_data = len(dataset) // num_users
+    for i in range(num_users):
+        indices = total_indices[i*num_data:(i+1)*num_data]
+        original = [dataset[i] for i in indices]
+        ds.append([(x,label) for (x,label) in original])
+    return ds
+
+def prepare_thermal_data(num_dev = 5, num_ds = 300):
+
+    train_dataset = torch.load('data/thermal/train_dataset_scaled.pt')
+    test_dataset = torch.load('data/thermal/test_dataset_scaled.pt')
+
+    return test_dataset, train_dataset, samples(train_dataset, num_dev)
